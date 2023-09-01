@@ -2,6 +2,9 @@
 output
 datasets
 weights
+local
+jobscripts
+wandb
 
 *.zip
 *.png
