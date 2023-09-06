@@ -45,6 +45,7 @@ from dynamite import (
 )
 
 from dynamite.inference.utils.eval_utils import log_single_instance, log_multi_instance
+
 import wandb
 wandb.init(entity='thesis-roy', project='dynamite_video', name='dynamite_train_BS_1_Res_512', sync_tensorboard=True)
 

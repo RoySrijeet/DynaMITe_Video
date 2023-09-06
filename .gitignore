@@ -54,3 +54,6 @@ _darcs
 /projects/*/datasets
 /models
 /snippet
+
+# jobscripts
+/dynamite_train.sh
