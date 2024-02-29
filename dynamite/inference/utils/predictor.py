@@ -12,7 +12,7 @@ class Predictor:
         self.pred_masks = None
 
     def get_prediction(self, clicker):
-        if self.features is None:
+        if self.features is None:   # first call
             (processed_results, outputs, self.images,
             _, self.features, self.mask_features,
             self.multi_scale_features, _, _,_) = self.model(clicker.inputs, max_timestamp=clicker.max_timestamps)

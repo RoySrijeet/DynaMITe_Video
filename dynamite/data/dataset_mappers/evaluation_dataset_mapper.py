@@ -58,6 +58,10 @@ class EvaluationDatasetMapper:
         logging.getLogger(__name__).info(
             "[EvaluationDatasetMapper] Full TransformGens used in training: {}".format(str(self.tfm_gens))
         )
+        #print('[INFO] EvaluationDatasetMapper called...')
+        #print(f'[INFO] tfm gens info: type {type(tfm_gens)}')   # list
+        #print(f'[INFO] tfm gens info: length {len(tfm_gens)}')  # 1
+        #print(f'[INFO] tfm gens info: element type {type(tfm_gens[0])}')  # detectron2.data.transforms.augmentation_impl.ResizeShortestEdge
 
         self.img_format = image_format
         self.is_train = is_train
@@ -85,39 +89,50 @@ class EvaluationDatasetMapper:
             dict: a format that builtin models in detectron2 accept
         """
         dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
-        image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
+
+        # reads the file as a PIL.Image, then converts it to a np.ndarray
+        # supported types: modes supported in PIL, or "BGR" or "YUV-BT.601"
+        image = utils.read_image(dataset_dict["file_name"], format=self.img_format)     
+
+        # check image resolution (height and width) with specifications mentioned in dataset_dict,
+        # if dataset_dict is missing 'height' and 'width' entries, populate them with image res
         utils.check_image_size(dataset_dict, image)
 
         # TODO: get padding mask
         # by feeding a "segmentation mask" to the same transforms
         orig_image_shape = image.shape[:2]
-        padding_mask = np.ones(image.shape[:2])
+        padding_mask = np.ones(image.shape[:2])                                     # initialize padding mask
 
-        image, transforms = T.apply_transform_gens(self.tfm_gens, image)
+        # apply transformations on the image
+        # additionally returns the "deterministic" transformations (fvcore.transforms.transform.TransformList)
+        # github: d2.data.transforms.augmentation.py
+        image, transforms = T.apply_transform_gens(self.tfm_gens, image)            
+        
         # the crop transformation has default padding value 0 for segmentation
-        padding_mask = transforms.apply_segmentation(padding_mask)
-        padding_mask = ~ padding_mask.astype(bool)
+        padding_mask = transforms.apply_segmentation(padding_mask)                  # apply same transformations as image to the mask
+        padding_mask = ~ padding_mask.astype(bool)                                  
 
         image_shape = image.shape[:2]  # h, w
 
         # Pytorch's dataloader is efficient on torch.Tensor due to shared-memory,
         # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
         # Therefore it's important to use torch.Tensor.
-        dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
+        dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))     # re-arrange image to C,H,W 
         dataset_dict["padding_mask"] = torch.as_tensor(np.ascontiguousarray(padding_mask))
 
+        # annotations - a list of dicts, one for each instance in the image
         if "annotations" in dataset_dict:
             # USER: Modify this if you want to keep them for some reason.
-            for anno in dataset_dict["annotations"]:
+            for anno in dataset_dict["annotations"]:        # for each instance, there's a dict
                 # Let's always keep mask
                 # if not self.mask_on:
                 #     anno.pop("segmentation", None)
-                anno.pop("keypoints", None)
+                anno.pop("keypoints", None)                 # remove 'keypoints' property (visibility), if exists
 
             annos = [
                 original_res_annotations(obj, orig_image_shape)
-                for obj in dataset_dict.pop("annotations")
-                if obj.get("iscrowd", 0) == 0
+                for obj in dataset_dict.pop("annotations")          # check if an object is labeled as COCO's 'crowd region'
+                if obj.get("iscrowd", 0) == 0                       # if not, update annotation properties (bbox and seg mask)
             ]
             # USER: Implement additional transformations if you have other types of data
             # annos = [
@@ -127,13 +142,16 @@ class EvaluationDatasetMapper:
             # ]
             # NOTE: does not support BitMask due to augmentation
             # Current BitMask cannot handle empty objects
-            if self.dataset_name == "coco_2017_val":
-                instances = utils.annotations_to_instances(annos, orig_image_shape)
+            if self.dataset_name == "coco_2017_val":        
+                instances = utils.annotations_to_instances(annos, orig_image_shape)     # d2 call - convert annos (list[dict]) to Instances object (detectron2.data.detection_utils.annotations_to_instances)
             else:
                 instances = utils.annotations_to_instances(annos, orig_image_shape,  mask_format="bitmask")
            
+            # if the instance has no ground truth mask, return
             if not hasattr(instances, 'gt_masks'):
                 return None
+            
+            # if ground truth mask exists, get a tight bounding box around the mask
             instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
             # Need to filter empty instances first (due to augmentation)
             instances = utils.filter_empty_instances(instances)
@@ -156,7 +174,9 @@ class EvaluationDatasetMapper:
                 new_gt_classes = [0]*new_gt_masks.shape[0]
                 new_gt_boxes =  Boxes((np.zeros((new_gt_masks.shape[0],4))))
                 
-                new_instances = Instances(image_size=image_shape)
+                # create a new Instance object with all the reqd properties
+                # this will go into the dataset dictionary of this image
+                new_instances = Instances(image_size=image_shape)           # image shape after transformations
                 new_instances.set('gt_masks', new_gt_masks)
                 new_instances.set('gt_classes', new_gt_classes)
                 new_instances.set('gt_boxes', new_gt_boxes) 
@@ -164,7 +184,9 @@ class EvaluationDatasetMapper:
                 ignore_masks = None
                 if 'ignore_mask' in dataset_dict:
                     ignore_masks = dataset_dict['ignore_mask'].to(device='cpu', dtype = torch.uint8)
-                    
+
+                # orig_fg_coords_list = FG click coordinates
+                # fg_coords_list = orig_fg_coords scaled to meet image resolutions
                 (num_clicks_per_object, fg_coords_list, orig_fg_coords_list) = get_gt_clicks_coords_eval(new_gt_masks, image_shape, ignore_masks=ignore_masks)
         
                 dataset_dict["orig_fg_click_coords"] = orig_fg_coords_list
@@ -207,21 +229,27 @@ def get_instance_map(masks):
 def original_res_annotations(
     annotation, image_size
 ):
-    bbox = BoxMode.convert(annotation["bbox"], annotation["bbox_mode"], BoxMode.XYXY_ABS)
-    annotation["bbox"] = np.minimum(bbox, list(image_size + image_size)[::-1])
+    """
+        annotation: a dictionary with annotations for an instance in the image
+        image_size: original resolution of the image (before applying transformations)
+    """
+    # convert bounding box (list of 4 numbers) format to BoxMode.XYXY_ABS
+    bbox = BoxMode.convert(annotation["bbox"], annotation["bbox_mode"], BoxMode.XYXY_ABS)   # (box, from_mode, to_mode)
+    annotation["bbox"] = np.minimum(bbox, list(image_size + image_size)[::-1])      # element-wise minimum - to ensure bbox is within image res
     annotation["bbox_mode"] = BoxMode.XYXY_ABS
 
+    # segmentation mask of the instance - convert input data to a list of masks
     if "segmentation" in annotation:
         # each instance contains 1 or more polygons
         segm = annotation["segmentation"]
         if isinstance(segm, list):
-            # polygons
+            # polygons (one for each connected component of the object)
             polygons = [np.asarray(p).reshape(-1, 2) for p in segm]
             annotation["segmentation"] = [
                 p.reshape(-1) for p in polygons
             ]
         elif isinstance(segm, dict):
-            # RLE
+            # RLE (COCO format)
             mask = mask_util.decode(segm)
             assert tuple(mask.shape[:2]) == image_size
             annotation["segmentation"] = mask

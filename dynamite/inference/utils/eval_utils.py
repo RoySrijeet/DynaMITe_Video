@@ -31,7 +31,7 @@ def get_palette(num_cls):
     return palette.reshape((-1, 3))
 color_map = get_palette(80)[1:]
 
-def get_gt_clicks_coords_eval(masks, image_shape, max_num_points=1, ignore_masks=None,
+def get_gt_clicks_coords_eval(masks, image_shape, max_num_points=1, ignore_masks=None,      
                              first_click_center=True, t= 0):
 
     """
@@ -41,29 +41,38 @@ def get_gt_clicks_coords_eval(masks, image_shape, max_num_points=1, ignore_masks
     # assert all_masks is not None
     masks = np.asarray(masks).astype(np.uint8)
     if ignore_masks is not None:
-        not_ignores_mask = np.logical_not(np.asarray(ignore_masks, dtype=np.bool_))
+        not_ignores_mask = np.logical_not(np.asarray(ignore_masks, dtype=np.bool_))  
 
-    I, H, W = masks.shape
-    trans_h, trans_w = image_shape
+    I, H, W = masks.shape               # num_of_instances x H x W
+    trans_h, trans_w = image_shape      # after transformations
     ratio_h = trans_h/H
     ratio_w = trans_w/W
-    num_clicks_per_object = [0]*I
-    orig_fg_coords_list = []
-    fg_coords_list = []
+    num_clicks_per_object = [0]*I       # initialize counter
+    orig_fg_coords_list = []            # initialize list of "original" FG coords
+    fg_coords_list = []                 # initialize list of FG coords
     # fg_point_masks = []
+    
+    # for mask of each instance in this image
     for i, (_m) in enumerate(masks):
         orig_coords = []
         coords = []
         # point_masks_per_obj = []
-        if first_click_center:
+        if first_click_center:      # default - True
             if ignore_masks is not None:
                 _m = np.logical_and(_m, not_ignores_mask[i]).astype(np.uint8)
-            center_coords = get_max_dt_point_mask(_m, max_num_pts=max_num_points)
-           
+            # coords of the mid-point of the mask (point with max distance from non-mask area)
+            center_coords = get_max_dt_point_mask(_m, max_num_pts=max_num_points)   # default max_num_pts=1
+
+            # append the center coords, along with current timestamp
             orig_coords.append([center_coords[0], center_coords[1], t])
+            
+            # scale the coords to fit image resolution
             coords.append([center_coords[0]*ratio_h, center_coords[1]*ratio_w, t])
+
             # if unique_timestamp:
             t+=1
+
+            # increment counter for current instance
             num_clicks_per_object[i]+=1
         orig_fg_coords_list.append(orig_coords) 
         fg_coords_list.append(coords)

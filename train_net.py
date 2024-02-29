@@ -46,8 +46,8 @@ from dynamite import (
 
 from dynamite.inference.utils.eval_utils import log_single_instance, log_multi_instance
 
-import wandb
-wandb.init(entity='thesis-roy', project='dynamite_video', name='dynamite_train_BS_1_Res_512', sync_tensorboard=True)
+#import wandb
+#wandb.init(entity='thesis-roy', project='dynamite_video', name='dynamite_train', sync_tensorboard=True)
 
 
 class Trainer(DefaultTrainer):
@@ -58,7 +58,7 @@ class Trainer(DefaultTrainer):
     @classmethod
     def build_test_loader(cls,cfg,dataset_name):
         mapper = EvaluationDatasetMapper(cfg,False,dataset_name)
-        return build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+        return build_detection_test_loader(cfg, dataset_name, mapper=mapper)        # d2 call
         
     @classmethod
     def build_train_loader(cls, cfg):
@@ -176,21 +176,27 @@ class Trainer(DefaultTrainer):
         Evaluate the given model. The given model is expected to already contain
         weights to evaluate.
         """
+        print('[INFO] Interactive Evaluation started...')
         if not args:
             return 
 
         logger = logging.getLogger(__name__)
 
         if args and args.eval_only:
-            eval_datasets = args.eval_datasets
-            vis_path = args.vis_path
-            eval_strategy = args.eval_strategy
+            eval_datasets = args.eval_datasets      # dataset to run evaluation on
+            vis_path = args.vis_path                
+            eval_strategy = args.eval_strategy      # "random", "best", "worst", "max_dt", "wlb", "round_robin"
             seed_id = args.seed_id
             iou_threshold = args.iou_threshold
             max_interactions = args.max_interactions
         
         # assert iou_threshold in [0.80, 0.85, 0.90, 0.95, 1.00]
         assert iou_threshold>=0.80
+
+        print(f'[INFO] Evaluation datasets: {eval_datasets}')
+        print(f'[INFO] Evaluation strategy: {eval_strategy}')
+        print(f'[INFO] IoU Threshold: {iou_threshold}')
+        print(f'[INFO] Max interaction limit: {max_interactions}')
 
         for dataset_name in eval_datasets:
 
@@ -215,7 +221,10 @@ class Trainer(DefaultTrainer):
                             res_gathered[k] += _d[k]
                     log_single_instance(res_gathered, max_interactions=max_interactions, 
                                         dataset_name=dataset_name, iou_threshold=iou_threshold)
+            
+            # multi-instance eval
             elif dataset_name in ["davis_2017_val","sbd_multi_insts","coco_2017_val"]:
+                print(f'[INFO] Initiating Multi-Instance Evaluation on {eval_datasets}...')
                 
                 if eval_strategy in ["random", "best", "worst"]:
                     from dynamite.inference.multi_instance.random_best_worst import evaluate
@@ -225,13 +234,26 @@ class Trainer(DefaultTrainer):
                     from dynamite.inference.multi_instance.wlb import evaluate
                 elif eval_strategy == "round_robin":
                     from dynamite.inference.multi_instance.round_robin import evaluate
+                print(f'[INFO] Loaded Evaluation routine following {eval_strategy} evaluation strategy!')
                 
-                data_loader = cls.build_test_loader(cfg, dataset_name)
+                print(f'[INFO] Loading test data loader from {dataset_name}...')
+                data_loader = cls.build_test_loader(cfg, dataset_name)      # creates evaluation dataset mapper and calls d2 test_loader
+                print(f'[INFO] Data loader  preparation complete!')
+                print(f'[INFO] Data loader info:')
+                print(f'[INFO] type: {type(data_loader)}')
+                print(f'[INFO] length: {len(data_loader)}')
                 
+                if dataset_name=="davis_2017_val":
+                    video_mode = True
+                else:
+                    video_mode = False
+                print(f'[INFO] Starting evaluation...')
                 results_i = evaluate(model, data_loader, iou_threshold = iou_threshold,
                                     max_interactions = max_interactions,
                                     eval_strategy = eval_strategy, seed_id=seed_id,
-                                    vis_path=vis_path)
+                                    vis_path=vis_path,video_mode=video_mode)
+                print(f'[INFO] Evaluation complete!')
+                
                 results_i = comm.gather(results_i, dst=0)  # [res1:dict, res2:dict,...]
                 if comm.is_main_process():
                     # sum the values with same keys
@@ -249,15 +271,16 @@ def setup(args):
     """
     Create configs and perform basic setups.
     """
-    cfg = get_cfg()
+    print('[INFO] Setting up DynaMITE...')
+    cfg = get_cfg()                             # cfg object
     # for poly lr schedule
     add_deeplab_config(cfg)
-    add_maskformer2_config(cfg)
+    add_maskformer2_config(cfg)                 
     add_hrnet_config(cfg)
-    cfg.merge_from_file(args.config_file)
+    cfg.merge_from_file(args.config_file)       # path to config file
     cfg.merge_from_list(args.opts)
-    cfg.freeze()
-    default_setup(cfg, args)
+    cfg.freeze()                                # make cfg (and children) immutable
+    default_setup(cfg, args)                    # D2 call
     # Setup logger for "mask_former" module
     setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="dynamite")
     return cfg
@@ -265,17 +288,25 @@ def setup(args):
 
 def main(args):
     
-    cfg = setup(args)
+    cfg = setup(args)       # create configs 
+    print('[INFO] Setup complete!')
+
+    # for evaluation
     if args.eval_only:
-        model = Trainer.build_model(cfg)
-        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+        print('[INFO] DynaMITE Evaluation!')
+        print('[INFO] Building model...')
+        model = Trainer.build_model(cfg)                                                # load model (torch.nn.Module)
+        print('[INFO] Loading model weights...')                                        
+        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(           # d2 checkpoint load
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
+        print('[INFO] Model loaded!')
         # res = Trainer.test(cfg, model)
-        res = Trainer.interactive_evaluation(cfg,model, args)
+        res = Trainer.interactive_evaluation(cfg,model, args)                           # evaluation
 
         return res
 
+    # for training
     trainer = Trainer(cfg)
     trainer.resume_or_load(resume=args.resume)
     return trainer.train()
@@ -284,7 +315,7 @@ def main(args):
 if __name__ == "__main__":
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
-    launch(
+    launch(                                                                             # d2 launch
         main,
         args.num_gpus,
         num_machines=args.num_machines,

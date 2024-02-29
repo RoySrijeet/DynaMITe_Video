@@ -57,3 +57,9 @@ _darcs
 
 # jobscripts
 /dynamite_train.sh
+/dynamite_eval.sh
+
+# experimental
+/dynxmem/*
+dynxmem_interactive_head.py
+dynxmem_s2m_head.py

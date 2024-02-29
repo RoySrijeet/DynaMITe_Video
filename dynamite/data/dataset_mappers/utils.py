@@ -30,10 +30,11 @@ def get_max_dt_point_mask(mask, max_num_pts=1):
     # masks[masks == void_label] = 0
 
     padded_mask = np.pad(mask, ((1, 1), (1, 1)), 'constant')
-    dt = cv2.distanceTransform(padded_mask.astype(np.uint8), cv2.DIST_L2, 0)[1:-1, 1:-1]
-    max_dist = np.max(dt)
+    # distance between each non-zero px and its nearest zero px
+    dt = cv2.distanceTransform(padded_mask.astype(np.uint8), cv2.DIST_L2, 0)[1:-1, 1:-1]    # ignore the padded area
+    max_dist = np.max(dt)       # max dist 
 
-    coords_y, coords_x = np.where(dt == max_dist)
+    coords_y, coords_x = np.where(dt == max_dist)   # point with max distance
 
     return [coords_y[0],coords_x[0]]
 

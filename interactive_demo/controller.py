@@ -7,12 +7,20 @@ from detectron2.data import transforms as T
 import copy
 from dynamite.utils.misc import color_map
 
+import torchvision
+
 class InteractiveController:
     def __init__(self, model, update_image_callback, cfg):
 
-        self.transforms = T.ResizeShortestEdge(
-            [cfg.INPUT.MIN_SIZE_TEST, cfg.INPUT.MIN_SIZE_TEST], cfg.INPUT.MAX_SIZE_TEST
-        )
+        #self.transforms = T.ResizeShortestEdge(
+        #    [cfg.INPUT.MIN_SIZE_TEST, cfg.INPUT.MIN_SIZE_TEST], cfg.INPUT.MAX_SIZE_TEST
+        #)
+        # torchvision
+        #print(f"cfg.INPUT.MIN_SIZE_TEST: {cfg.INPUT.MIN_SIZE_TEST}") # 800
+        #print(f"cfg.INPUT.MAX_SIZE_TEST: {cfg.INPUT.MAX_SIZE_TEST}") # 1333
+        self.transforms = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(cfg.INPUT.MIN_SIZE_TEST, max_size=cfg.INPUT.MAX_SIZE_TEST)
+        ])
        
         self._result_masks = None
         self._inputs = {}
@@ -25,12 +33,25 @@ class InteractiveController:
 
     def set_image(self, image):
         self.image = copy.deepcopy(image)
+        print(f'Inside set_image()')
+        print(f'self.image type: {type(self.image)}')
+        print(f'self.image shape: {self.image.shape}')
        
         h,w = self.image.shape[:2]
         self._inputs["height"] = h
         self._inputs["width"] = w
-        img=  self.transforms.get_transform(self.image).apply_image(self.image)
-        self._inputs["image"] = torch.as_tensor(np.ascontiguousarray(img.transpose(2, 0, 1)))
+        #img=  self.transforms.get_transform(self.image).apply_image(self.image)
+        #print(f'After transformation, shape: {img.shape}')
+        #self._inputs["image"] = torch.as_tensor(np.ascontiguousarray(img.transpose(2, 0, 1)))
+        #print(f'_inputs as tensor: {type(self._inputs["image"])}, {self._inputs["image"].size()}')
+        
+        # torchvision transform
+        img_tensor = torch.as_tensor(np.ascontiguousarray(self.image))
+        img_tensor = img_tensor.permute(2,1,0)
+        transformed_img_tensor = self.transforms(img_tensor)
+        print(f'After transformation, shape: {transformed_img_tensor.size()}')
+        self._inputs["image"] = transformed_img_tensor.permute(0,2,1)
+        print(f'After permutation, shape: {self._inputs["image"].size()}')
 
         self.new_h, self.new_w = self._inputs["image"].shape[-2:]
         self.rh = self.new_h/h
@@ -95,6 +116,7 @@ class InteractiveController:
             self.num_insts[0] = len(self.num_clicks_per_object[0])
       
         inputs = [self._inputs]
+        #print(f'inputs: {inputs}')
 
         if self.features is None:
             (processed_results, outputs, self.images,
@@ -102,6 +124,7 @@ class InteractiveController:
             self.multi_scale_features,
             self.num_clicks_per_object, self.fg_coords,
             self.bg_coords) = self.predictor(inputs, max_timestamp=self.max_timestamp)
+            #print(f'processed_results: {processed_results}')
             self.device = self.images.tensor.device
         else:
             (processed_results, outputs, self.images,
@@ -114,9 +137,10 @@ class InteractiveController:
                                                 self.num_clicks_per_object,
                                                 self.fg_coords, self.bg_coords,
                                                 max_timestamp=self.max_timestamp)
+            #print(f'processed_results: {processed_results}')
 
         self._result_masks = processed_results[0]['instances'].pred_masks
-
+        print(f'Dynamite Output: {self._result_masks.size()}')
         # We don't overwrite current mask until commit
         self.last_masks = self._result_masks
 

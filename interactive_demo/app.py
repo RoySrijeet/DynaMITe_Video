@@ -15,18 +15,26 @@ from dynamite.utils.misc import color_map
 class InteractiveDemoApp(ttk.Frame):
     def __init__(self, master, args, cfg, model):
         super().__init__(master)
+
+        # init UI window
         self.master = master
         master.title("DynaMITe: Dynamic Query Bootstrapping for Multi-object Interactive Segmentation Transformer")
         master.withdraw()
         master.update_idletasks()
+        # center the window
         x = (master.winfo_screenwidth() - master.winfo_reqwidth()) / 2
         y = (master.winfo_screenheight() - master.winfo_reqheight()) / 2
-        master.geometry("+%d+%d" % (x, y))
+        #master.geometry("+%d+%d" % (x, y))
+        master.geometry("+200+400")
         self.pack(fill="both", expand=True)
-        self._input_file =None
+        
+        self._input_file =None              # stores input file name
         self.show_masks_only = False
         self.is_bg_click = False
+
+        # model
         self.controller = InteractiveController(model, update_image_callback=self._update_image, cfg=cfg)
+        
         self.xPos = 0
         self.num_instances = 0
         self.prev_pressed = None
@@ -126,6 +134,8 @@ class InteractiveDemoApp(ttk.Frame):
     def _load_image_callback(self):
         self.menubar.focus_set()
         if self._check_entry(self):
+
+            # browse to the image file
             filename = filedialog.askopenfilename(parent=self.master, filetypes=[
                 ("Images", "*.jpg *.jpeg *.png *.bmp *.tiff"),
                 ("All files", "*.*"),
@@ -134,13 +144,17 @@ class InteractiveDemoApp(ttk.Frame):
             if len(filename) > 0:
                 for key in self.buttons:
                     self.buttons[key].destroy()
+                
+                # initialize more properties
                 self.num_instances = 0
                 self.prev_pressed = None
                 self.is_bg_click = False
                 self.BG_CLICK.configure(fg= 'green')
                 self.xPos = 0
+                
+                # reads image as numpy array
                 image = cv2.cvtColor(cv2.imread(filename), cv2.COLOR_BGR2RGB)
-                self.controller.set_image(image)
+                self.controller.set_image(image)    
                 self.save_mask_btn.configure(state=tk.NORMAL)
                 self.load_mask_btn.configure(state=tk.NORMAL)
                 self.save_mask_only_btn.configure(state=tk.NORMAL)
